@@ -1,1 +1,2 @@
-python3-distutils
+apt-get install python3-distutils -y
+
