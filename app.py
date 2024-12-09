@@ -10,9 +10,12 @@ import xgboost as xgb
 from sklearn.model_selection import train_test_split, GridSearchCV
 import os  # 用于文件和文件夹操作
 from datetime import datetime  # 用于生成时间戳
+import matplotlib.font_manager as fm
 
-# 设置 Matplotlib 字体，解决中文显示问题
-plt.rcParams['font.family'] = ['Microsoft YaHei']  # 设置字体，支持中文
+# 加载中文字体文件（需将 SimHei.ttf 文件放在与本代码同目录）
+font_path = "SimHei.ttf"
+fm.fontManager.addfont(font_path)
+plt.rcParams['font.family'] = 'SimHei'  # 设置字体，支持中文
 plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
 
 # 设置页面配置
@@ -32,6 +35,7 @@ if 'page' not in st.session_state:
     st.session_state.initial_decision_made = False  # 标记是否已做初始决策
     st.session_state.final_decision_made = False  # 标记是否已做最终决策
     st.session_state.sliders_completed = False  # 标记滑块问题是否已完成
+    st.session_state.results_saved = False  # 标记结果是否已保存
 
 # 加载数据
 @st.cache_data
@@ -191,18 +195,15 @@ def training_page():
     if group == 'group1':
         st.write("**培训内容：**")
         st.write("您将根据申请者的信息和AI的建议，判断贷款是否会被批准。")
-        # 添加更多培训内容...
 
     elif group == 'group2':
         st.write("**培训内容：**")
         st.write("您将看到AI的建议和SHAP解释图，以帮助您理解AI的决策依据。")
-        # 使用您提供的 SHAP 图
         st.image('shap解释.png', caption='SHAP解释图示例')
 
     elif group == 'group3':
         st.write("**培训内容：**")
         st.write("您将看到AI的建议和文本解释，以帮助您理解AI的决策依据。")
-        # 提供文本解释的示例
         st.write("""
         **文本解释示例：**
 
@@ -212,7 +213,6 @@ def training_page():
     elif group == 'group4':
         st.write("**培训内容：**")
         st.write("您将看到AI的建议和交互式解释，以帮助您理解AI的决策依据。")
-        # 提供交互式解释的示例
         st.write("以下是交互式解释的示例，您可以调整特征值，查看模型预测的变化：")
         sample_features = {}
         for col in ['cibil_score', 'loan_term', 'loan_amount', 'income_annum', 'residential_assets_value']:
@@ -236,7 +236,6 @@ def quiz_page():
     st.title("培训测试")
     group = st.session_state.group
 
-    # 不同组别有不同的测试题目
     if group == 'group1':
         questions = [
             {
@@ -244,7 +243,6 @@ def quiz_page():
                 'options': ['正确', '错误'],
                 'answer': '正确'
             },
-            # 添加更多问题...
         ]
     elif group == 'group2':
         questions = [
@@ -255,11 +253,10 @@ def quiz_page():
             },
             {
                 'question': '基于下方的Shap解释图，你认为redidential_assets_value是对模型预测正向影响最大的特征吗？',
-                'image': '对实例的Shap解释图.png',  # 您需要提供的图片
+                'image': '对实例的Shap解释图.png',
                 'options': ['正确', '错误'],
                 'answer': '正确'
             },
-            # 添加更多问题...
         ]
     elif group == 'group3':
         questions = [
@@ -268,7 +265,6 @@ def quiz_page():
                 'options': ['正确', '错误'],
                 'answer': '正确'
             },
-            # 添加更多问题...
         ]
     elif group == 'group4':
         questions = [
@@ -282,7 +278,6 @@ def quiz_page():
                 'options': ['了解', '不了解'],
                 'answer': '了解'
             },
-            # 添加更多问题...
         ]
 
     if 'quiz_submitted' not in st.session_state:
@@ -338,7 +333,6 @@ def experiment_page():
             st.session_state.start_time = time.time()
     elif not st.session_state.final_decision_made:
         # 显示AI建议和解释阶段
-        # 显示用户的初始决策
         st.write(f"**您的初始决策：{st.session_state.initial_decisions[-1]}**")
 
         # 显示AI的预测结果
@@ -347,13 +341,11 @@ def experiment_page():
         ai_decision = '批准' if ai_prediction == 1 else '拒绝'
         st.write(f"**AI 建议：{ai_decision}**")
 
-        # 显示AI解释
         group = st.session_state.group
 
         if group == 'group1':
             st.write("（此组别不提供AI解释。）")
         elif group == 'group2':
-            # 显示 SHAP 解释图
             shap_values = explainer(X_case)
             st.write("**AI 解释（SHAP 解释）：**")
             shap.initjs()
@@ -361,19 +353,15 @@ def experiment_page():
             shap.plots.waterfall(shap_values[0], max_display=5, show=False)
             st.pyplot(fig)
         elif group == 'group3':
-            # 显示文本解释
             st.write("**AI 解释（文本解释）：**")
-            # 基于SHAP值生成文本解释
             shap_values = explainer(X_case)
             feature_impact = pd.DataFrame({
                 'feature': X_case.columns,
                 'value': X_case.values[0],
                 'shap_value': shap_values.values[0]
             })
-            # 按照SHAP值绝对值排序
             feature_impact['abs_shap'] = feature_impact['shap_value'].abs()
             feature_impact.sort_values('abs_shap', ascending=False, inplace=True)
-            # 生成解释文本
             explanation = "模型认为："
             first = True
             for idx, row in feature_impact.iterrows():
@@ -387,10 +375,8 @@ def experiment_page():
                     explanation += f"{row['feature']} 值为 {row['value']} 对结果有负面影响"
             st.write(explanation)
         elif group == 'group4':
-            # 实现交互式解释
             st.write("**AI 解释（交互式解释）：**")
             st.write("您可以调整以下特征值，查看模型预测的变化：")
-            # 提供特征调整滑块
             adjusted_features = {}
             for col in X_case.columns:
                 min_val = df[col].min()
@@ -401,36 +387,28 @@ def experiment_page():
                 else:
                     adjusted_value = st.slider(f"{col}", float(min_val), float(max_val), float(mean_val), key=f'adjust_{col}_{st.session_state.case_index}')
                 adjusted_features[col] = adjusted_value
-            # 构建新的输入数据
             X_adjusted = pd.DataFrame(adjusted_features, index=[0])
-            # 计算新的预测结果
             adjusted_prediction = model.predict(X_adjusted)[0]
             adjusted_decision = '批准' if adjusted_prediction == 1 else '拒绝'
             st.write(f"**调整后的AI建议：{adjusted_decision}**")
-            # 不再显示调整后的 SHAP 解释图
 
         # 最终决策阶段
         final_decision = st.radio("请给出您的最终决策：", ['批准', '拒绝'], key=f'final_decision_{st.session_state.case_index}')
         if st.button("提交最终决策", key=f'submit_final_{st.session_state.case_index}'):
             st.session_state.final_decisions.append(final_decision)
             st.session_state.final_decision_made = True
-            # 记录决策时间
             decision_time = time.time() - st.session_state.start_time
             st.session_state.decision_times.append(decision_time)
     elif not st.session_state.sliders_completed:
-        # 滑块问题阶段
         st.write("**请回答以下问题（0-100）：**")
         trust_score = st.slider("我完全相信AI预测：", 0, 100, key=f'trust_score_{st.session_state.case_index}')
         reliance_score = st.slider("我依赖于AI的提示：", 0, 100, key=f'reliance_score_{st.session_state.case_index}')
         if st.button("下一步", key=f'next_{st.session_state.case_index}'):
-            # 保存评分
             st.session_state.trust_scores.append(trust_score)
             st.session_state.reliance_scores.append(reliance_score)
             st.session_state.sliders_completed = True
 
-            # 进入下一个案例
             st.session_state.case_index += 1
-            # 重置状态变量
             st.session_state.initial_decision_made = False
             st.session_state.final_decision_made = False
             st.session_state.sliders_completed = False
@@ -438,18 +416,13 @@ def experiment_page():
 
             if st.session_state.case_index >= len(st.session_state.cases):
                 st.session_state.page = 'survey'
-            else:
-                # 由于状态变量已更新，页面会自动刷新并进入下一个案例
-                pass
     else:
-        # 如果出现未预料的状态
         st.write("请按照指示完成实验步骤。")
 
 def survey_page():
     st.title("问卷调查")
     st.write("感谢您完成实验。请回答以下问题，其中“非常同意”、“同意”、“有点同意”、“中立”、“有点不同意”、“不同意”和“非常不同意”，分别记为7、6、5、4、3、2、1。")
 
-    # 更新问卷调查的题目
     questions = [
         "1. 系统提供了有用的信息来了解申请者的贷款审批情况。",
         "2. 系统为申请者的贷款审批情况提供了新的见解。",
@@ -487,7 +460,6 @@ def thankyou_page():
     st.title("实验结束")
     st.write("感谢您的参与！")
 
-    # 保存数据
     num_cases = len(st.session_state.initial_decisions)
     results = pd.DataFrame({
         'Case_Index': list(range(1, num_cases + 1)),
@@ -500,31 +472,43 @@ def thankyou_page():
     st.write("您的实验结果：")
     st.dataframe(results)
 
-    # 显示问卷调查结果
-    st.write("您的问卷调查回答：")
     survey_df = pd.DataFrame({
         'Question': [f"Q{idx+1}" for idx in range(len(st.session_state.survey_responses))],
         'Response': st.session_state.survey_responses
     })
+    st.write("您的问卷调查回答：")
     st.dataframe(survey_df)
 
-    # 保存结果到对应的组别文件夹，并为每个参与者创建一个单独的文件夹
+    # 使用相对路径在当前目录中创建文件夹存储结果
     group = st.session_state.group
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     participant_id = f"participant_{timestamp}"
-    base_path = r"D:\jhjmdcsj"  # 指定的保存路径
     folder_path = os.path.join(os.getcwd(), group, participant_id)
 
-    # 如果文件夹不存在，创建文件夹
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
 
-    # 保存实验结果
-    results.to_csv(os.path.join(folder_path, "results.csv"), index=False)
-    # 保存问卷调查结果
-    survey_df.to_csv(os.path.join(folder_path, "survey.csv"), index=False)
+    results_file = os.path.join(folder_path, "results.csv")
+    survey_file = os.path.join(folder_path, "survey.csv")
 
-    st.write("您的数据已成功保存。")
+    results.to_csv(results_file, index=False)
+    survey_df.to_csv(survey_file, index=False)
+
+    st.write("您的数据已保存到服务器临时目录。请注意数据不会长期保留。")
+
+    # 提供下载按钮，用户可下载结果
+    st.download_button(
+        label="下载实验结果数据 (results.csv)",
+        data=results.to_csv(index=False),
+        file_name="results.csv",
+        mime="text/csv"
+    )
+    st.download_button(
+        label="下载问卷调查数据 (survey.csv)",
+        data=survey_df.to_csv(index=False),
+        file_name="survey.csv",
+        mime="text/csv"
+    )
 
 # 页面路由
 if st.session_state.page == 'consent':
@@ -542,9 +526,9 @@ elif st.session_state.page == 'survey':
 elif st.session_state.page == 'thankyou':
     thankyou_page()
 else:
-    # 默认页面
     st.session_state.page = 'consent'
     consent_page()
+
 
 
 
