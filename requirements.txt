@@ -4,12 +4,13 @@ wheel
 matplotlib
 numpy
 pandas
-scikit-learn==1.2.2
-shap
+scikit-learn>=1.0.0,<1.3.0
+shap>=0.40.0,<0.43.0
 streamlit
-xgboost==2.0.0
+xgboost>=1.6.0,<2.0.0
 ipython
 boto3
+
 
 
 
