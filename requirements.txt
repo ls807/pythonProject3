@@ -2,7 +2,8 @@ boto3
 matplotlib
 numpy
 pandas
-scikit-learn
+scikit-learn==1.0.2
 shap
 streamlit
-xgboost>=2.0.0
+xgboost==1.6.2
+
