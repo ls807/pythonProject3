@@ -1,4 +1,5 @@
 # 不指定setuptools，不锁定版本号，让环境自动选择合适版本
+--no-binary shap,xgboost
 pip
 wheel
 matplotlib
