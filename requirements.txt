@@ -9,6 +9,6 @@ shap
 streamlit
 xgboost
 ipython
-
+boto3
 
 
