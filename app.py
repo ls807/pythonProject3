@@ -8,63 +8,56 @@ import shap
 import matplotlib.pyplot as plt
 import xgboost as xgb
 from sklearn.model_selection import train_test_split, GridSearchCV
-import os  # 用于文件和文件夹操作
-from datetime import datetime  # 用于生成时间戳
+import os
+from datetime import datetime
 import matplotlib.font_manager as fm
+from io import StringIO
+import boto3
 
-# 加载中文字体文件（需将 SimHei.ttf 文件放在与本代码同目录）
+# 加载中文字体文件（需要将 SimHei.ttf 上传到项目根目录）
 font_path = "SimHei.ttf"
 fm.fontManager.addfont(font_path)
-plt.rcParams['font.family'] = 'SimHei'  # 设置字体，支持中文
-plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
+plt.rcParams['font.family'] = 'SimHei'
+plt.rcParams['axes.unicode_minus'] = False
 
-# 设置页面配置
 st.set_page_config(page_title="贷款审批实验", page_icon=":money_with_wings:", layout="centered")
 
-# 初始化 session_state 中的变量
 if 'page' not in st.session_state:
-    st.session_state.page = 'consent'  # 当前页面
-    st.session_state.group = random.choice(['group1', 'group2', 'group3', 'group4'])  # 随机分组
-    st.session_state.case_index = 0  # 当前案例索引
-    st.session_state.initial_decisions = []  # 初始决策列表
-    st.session_state.final_decisions = []  # 最终决策列表
-    st.session_state.decision_times = []  # 决策时间列表
-    st.session_state.trust_scores = []  # 信任度评分列表
-    st.session_state.reliance_scores = []  # 依赖度评分列表
-    st.session_state.start_time = None  # 计时开始时间
-    st.session_state.initial_decision_made = False  # 标记是否已做初始决策
-    st.session_state.final_decision_made = False  # 标记是否已做最终决策
-    st.session_state.sliders_completed = False  # 标记滑块问题是否已完成
-    st.session_state.results_saved = False  # 标记结果是否已保存
+    st.session_state.page = 'consent'
+    st.session_state.group = random.choice(['group1', 'group2', 'group3', 'group4'])
+    st.session_state.case_index = 0
+    st.session_state.initial_decisions = []
+    st.session_state.final_decisions = []
+    st.session_state.decision_times = []
+    st.session_state.trust_scores = []
+    st.session_state.reliance_scores = []
+    st.session_state.start_time = None
+    st.session_state.initial_decision_made = False
+    st.session_state.final_decision_made = False
+    st.session_state.sliders_completed = False
+    st.session_state.results_saved = False
 
-# 加载数据
 @st.cache_data
 def load_data():
     df = pd.read_csv('loan_approval_dataset_xiu.csv')
-    # 只保留指定的5个特征和目标变量
     df.columns = df.columns.str.strip()
     df = df[['cibil_score', 'loan_term', 'loan_amount', 'income_annum', 'residential_assets_value', 'loan_status']]
     return df
 
 df = load_data()
 
-# 指定案例索引
 specific_indices = [2, 5, 1174, 10, 15, 2564, 25, 30, 1039, 40]
 if 'cases' not in st.session_state:
     st.session_state.cases = df.iloc[specific_indices].reset_index(drop=True)
 
-# 定义模型训练函数
 @st.cache_resource
 def train_model(data):
     X = data.drop(['loan_status'], axis=1)
     y = data['loan_status']
-
-    # Split into training and test sets
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
 
-    # XGBoost模型参数
     params_xgb = {
         'learning_rate': 0.02,
         'booster': 'gbtree',
@@ -78,17 +71,12 @@ def train_model(data):
         'eval_metric': 'logloss'
     }
 
-    # 初始化XGBoost分类模型
     model_xgb = xgb.XGBClassifier(**params_xgb)
-
-    # 定义参数网格，用于网格搜索
     param_grid = {
         'n_estimators': [100, 200],
         'max_depth': [3, 4],
         'learning_rate': [0.01, 0.02],
     }
-
-    # 使用GridSearchCV进行网格搜索和k折交叉验证
     grid_search = GridSearchCV(
         estimator=model_xgb,
         param_grid=param_grid,
@@ -97,25 +85,18 @@ def train_model(data):
         n_jobs=-1,
         verbose=0
     )
-
-    # 训练模型
     grid_search.fit(X_train, y_train)
-
-    # 使用最优参数训练模型
     best_model = grid_search.best_estimator_
-
     return best_model
 
 model = train_model(df)
 
-# 获取 SHAP Explainer
 @st.cache_resource
 def get_shap_explainer(_model, data):
     return shap.Explainer(_model, data)
 
 explainer = get_shap_explainer(model, df.drop('loan_status', axis=1))
 
-# 定义页面逻辑
 def consent_page():
     st.title("知情同意书")
     st.write("""
@@ -132,7 +113,7 @@ def consent_page():
 
 def instructions_page():
     st.title("实验说明")
-    st.write(f"""
+    st.write("""
     **任务目标：**
 
     您需要扮演银行贷款审批人员，根据申请者的资料判断贷款是否会被批准。
@@ -148,7 +129,6 @@ def instructions_page():
     实验结束后，根据您的决策准确率发放相应的奖金，准确率越高，奖金越高，具体为准确率高于80%，会有额外的奖金。
     """)
 
-    # 添加指定的图片
     st.write("为了让你更好的理解实验中涉及的叠加直方图，下面将依次提供叠加直方图和数据标签的解释说明")
     st.image('叠加直方图示例.png', caption='叠加直方图示例')
     st.image('数据标签解释.png', caption='数据标签说明')
@@ -159,13 +139,12 @@ def instructions_page():
     在正式开始实验之前，请先查看以下图表，了解特征与目标变量之间的关系。
     """)
 
-    # 显示特征与目标变量之间的关系图（叠加直方图）
     variables = ["income_annum", "loan_term", "cibil_score", "loan_amount", "residential_assets_value"]
     target = "loan_status"
 
     for var in variables:
         st.write(f"**{var} 与 {target} 的关系：**")
-        fig, ax = plt.subplots(figsize=(8, 5))  # 每张图的大小
+        fig, ax = plt.subplots(figsize=(8, 5))
         for status, color in zip(df[target].unique(), ['blue', 'orange']):
             subset = df[df[target] == status]
             ax.hist(subset[var], bins=20, alpha=0.5, density=True, label=f"{target} = {status}", color=color)
@@ -174,18 +153,15 @@ def instructions_page():
         ax.set_ylabel("密度", fontsize=12)
         ax.legend(title=target, fontsize=10)
         ax.grid(axis='y', linestyle='--', alpha=0.7)
-        plt.tight_layout()  # 自动调整布局
+        plt.tight_layout()
         st.pyplot(fig)
 
-    st.write("如果你已掌握上述信息，请点击下方的“开始培训”按钮进入培训环节。")
     if st.button("开始培训", key='start_training'):
         st.session_state.page = 'training'
 
 def training_page():
     st.title("培训")
     group = st.session_state.group
-
-    # 公共的报酬描述
     st.write("""
     **报酬方式：**
 
@@ -228,7 +204,6 @@ def training_page():
         sample_decision = '批准' if sample_prediction == 1 else '拒绝'
         st.write(f"**模型预测结果：{sample_decision}**")
 
-    st.write("**请认真阅读以上内容，理解后点击下方按钮进入测试。**")
     if st.button("开始测试", key='start_quiz'):
         st.session_state.page = 'quiz'
 
@@ -324,7 +299,6 @@ def experiment_page():
     st.table(case.drop('loan_status').to_frame().T)
 
     if not st.session_state.initial_decision_made:
-        # 初始决策阶段
         st.write("请根据以上信息判断贷款是否会被批准：")
         initial_decision = st.radio("", ['批准', '拒绝'], key=f'initial_decision_{st.session_state.case_index}')
         if st.button("提交初始决策", key=f'submit_initial_{st.session_state.case_index}'):
@@ -332,10 +306,7 @@ def experiment_page():
             st.session_state.initial_decision_made = True
             st.session_state.start_time = time.time()
     elif not st.session_state.final_decision_made:
-        # 显示AI建议和解释阶段
         st.write(f"**您的初始决策：{st.session_state.initial_decisions[-1]}**")
-
-        # 显示AI的预测结果
         X_case = case.drop('loan_status').to_frame().T
         ai_prediction = model.predict(X_case)[0]
         ai_decision = '批准' if ai_prediction == 1 else '拒绝'
@@ -392,7 +363,6 @@ def experiment_page():
             adjusted_decision = '批准' if adjusted_prediction == 1 else '拒绝'
             st.write(f"**调整后的AI建议：{adjusted_decision}**")
 
-        # 最终决策阶段
         final_decision = st.radio("请给出您的最终决策：", ['批准', '拒绝'], key=f'final_decision_{st.session_state.case_index}')
         if st.button("提交最终决策", key=f'submit_final_{st.session_state.case_index}'):
             st.session_state.final_decisions.append(final_decision)
@@ -469,46 +439,40 @@ def thankyou_page():
         'Trust_Score': st.session_state.trust_scores,
         'Reliance_Score': st.session_state.reliance_scores
     })
-    st.write("您的实验结果：")
-    st.dataframe(results)
 
     survey_df = pd.DataFrame({
         'Question': [f"Q{idx+1}" for idx in range(len(st.session_state.survey_responses))],
         'Response': st.session_state.survey_responses
     })
+
+    st.write("您的实验结果：")
+    st.dataframe(results)
     st.write("您的问卷调查回答：")
     st.dataframe(survey_df)
 
-    # 使用相对路径在当前目录中创建文件夹存储结果
-    group = st.session_state.group
+    # 使用 st.secrets 中的 AWS 凭证信息
+    aws_access_key = st.secrets["aws"]["aws_access_key_id"]
+    aws_secret_key = st.secrets["aws"]["aws_secret_access_key"]
+    bucket_name = st.secrets["aws"]["aws_bucket_name"]
+    region_name = st.secrets["aws"]["aws_region"]
+
+    s3 = boto3.client('s3',
+                      aws_access_key_id=aws_access_key,
+                      aws_secret_access_key=aws_secret_key,
+                      region_name=region_name)
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     participant_id = f"participant_{timestamp}"
-    folder_path = os.path.join(os.getcwd(), group, participant_id)
+    folder_path = f"{st.session_state.group}/{participant_id}"
 
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
+    results_csv = results.to_csv(index=False)
+    survey_csv = survey_df.to_csv(index=False)
 
-    results_file = os.path.join(folder_path, "results.csv")
-    survey_file = os.path.join(folder_path, "survey.csv")
+    s3.put_object(Bucket=bucket_name, Key=f"{folder_path}/results.csv", Body=results_csv)
+    s3.put_object(Bucket=bucket_name, Key=f"{folder_path}/survey.csv", Body=survey_csv)
 
-    results.to_csv(results_file, index=False)
-    survey_df.to_csv(survey_file, index=False)
-
-    st.write("您的数据已保存到服务器临时目录。请注意数据不会长期保留。")
-
-    # 提供下载按钮，用户可下载结果
-    st.download_button(
-        label="下载实验结果数据 (results.csv)",
-        data=results.to_csv(index=False),
-        file_name="results.csv",
-        mime="text/csv"
-    )
-    st.download_button(
-        label="下载问卷调查数据 (survey.csv)",
-        data=survey_df.to_csv(index=False),
-        file_name="survey.csv",
-        mime="text/csv"
-    )
+    st.write("实验数据已上传至 S3 存储桶。")
+    st.write("请注意，您可以使用 S3 控制台或相应的工具从 S3 下载这些文件。")
 
 # 页面路由
 if st.session_state.page == 'consent':
