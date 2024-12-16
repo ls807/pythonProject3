@@ -11,31 +11,40 @@ from sklearn.model_selection import train_test_split, GridSearchCV
 import os
 from datetime import datetime
 import matplotlib.font_manager as fm
-from io import StringIO
-import boto3
+import boto3  # 导入 boto3
 
-# 加载中文字体文件（需要将 SimHei.ttf 上传到项目根目录）
+# 加载中文字体文件（SimHei.ttf放在项目根目录）
 font_path = "SimHei.ttf"
-fm.fontManager.addfont(font_path)
-plt.rcParams['font.family'] = 'SimHei'
-plt.rcParams['axes.unicode_minus'] = False
+if os.path.exists(font_path):
+    fm.fontManager.addfont(font_path)
+    plt.rcParams['font.family'] = 'SimHei'
+    plt.rcParams['axes.unicode_minus'] = True  # 修复负号显示
+else:
+    st.warning("未找到 SimHei.ttf 字体文件，负号可能无法正确显示。将使用默认字体。")
+    plt.rcParams['font.family'] = 'DejaVu Sans'  # 使用默认字体
+    plt.rcParams['axes.unicode_minus'] = True  # 确保负号显示
 
+# 配置Streamlit页面
 st.set_page_config(page_title="贷款审批实验", page_icon=":money_with_wings:", layout="centered")
 
+# 初始化会话状态
 if 'page' not in st.session_state:
     st.session_state.page = 'consent'
     st.session_state.group = random.choice(['group1', 'group2', 'group3', 'group4'])
     st.session_state.case_index = 0
-    st.session_state.initial_decisions = []
     st.session_state.final_decisions = []
     st.session_state.decision_times = []
     st.session_state.trust_scores = []
     st.session_state.reliance_scores = []
     st.session_state.start_time = None
-    st.session_state.initial_decision_made = False
-    st.session_state.final_decision_made = False
-    st.session_state.sliders_completed = False
     st.session_state.results_saved = False
+
+    # 新增：存储前实验调查问卷结果
+    st.session_state.pre_survey_responses = {}
+    st.session_state.survey_responses = []
+    st.session_state.quiz_submitted = False
+    st.session_state.quiz_passed = False
+    st.session_state.current_step = 1  # 引入当前步骤
 
 @st.cache_data
 def load_data():
@@ -46,7 +55,11 @@ def load_data():
 
 df = load_data()
 
-specific_indices = [2, 5, 1174, 10, 15, 2564, 25, 30, 1039, 40]
+# 改动1：修改前10个和后10个案例的索引
+indices_first_10 = [70, 90, 2856, 100, 564, 110, 120, 1174, 130, 140]
+indices_last_10 = [2, 5, 10, 1039, 15, 25, 30, 2564, 40, 50]
+specific_indices = indices_first_10 + indices_last_10
+
 if 'cases' not in st.session_state:
     st.session_state.cases = df.iloc[specific_indices].reset_index(drop=True)
 
@@ -122,22 +135,24 @@ def instructions_page():
 
     1. 您将接受一个简单的培训，了解实验平台的使用以及 AI 解释。
     2. 培训结束后，需回答几个问题，全部答对后才能进入正式实验。
-    3. 正式实验中，您将依次评估10个贷款申请案例。
+    3. 正式实验中，您将依次评估20个贷款申请案例（前10个无解释，后10个视组别而定）。
 
     **报酬方式：**
 
-    实验结束后，根据您的决策准确率发放相应的奖金，准确率越高，奖金越高，具体为准确率高于80%，会有额外的奖金。
+    实验结束后，将根据您的决策准确性分发奖金，除基础奖金外，准确率高于85%的参与者将获得额外奖金。
+
+    **相关解释说明：**
+
+    本实验中的AI解释包括SHAP解释、文本解释以及交互式解释（视组别而定），以帮助您了解模型决策的依据。
+
+    **解释说明：**
+
+    在正式开始实验之前，请先查看以下图表，了解特征与目标变量之间的关系。
     """)
 
     st.write("为了让你更好的理解实验中涉及的叠加直方图，下面将依次提供叠加直方图和数据标签的解释说明")
     st.image('叠加直方图示例.png', caption='叠加直方图示例')
     st.image('数据标签解释.png', caption='数据标签说明')
-
-    st.write("""
-    **数据分析：**
-
-    在正式开始实验之前，请先查看以下图表，了解特征与目标变量之间的关系。
-    """)
 
     variables = ["income_annum", "loan_term", "cibil_score", "loan_amount", "residential_assets_value"]
     target = "loan_status"
@@ -162,49 +177,32 @@ def instructions_page():
 def training_page():
     st.title("培训")
     group = st.session_state.group
+
     st.write("""
     **报酬方式：**
 
-    实验结束后，根据您的决策准确率发放相应的奖金，准确率越高，奖金越高，具体为准确率高于80%，会有额外的奖金。
+    实验结束后，将根据您的决策准确性分发奖金，除基础奖金外，准确率高于85%的参与者将获得额外奖金。
     """)
 
     if group == 'group1':
-        st.write("**培训内容：**")
-        st.write("您将根据申请者的信息和AI的建议，判断贷款是否会被批准。")
-
+        st.write("您将根据申请者的信息和AI的建议，判断贷款是否会被批准。（该组不提供AI解释）")
     elif group == 'group2':
-        st.write("**培训内容：**")
-        st.write("您将看到AI的建议和SHAP解释图，以帮助您理解AI的决策依据。")
-        st.image('shap解释.png', caption='SHAP解释图示例')
-
+        st.write("您将根据申请者信息和AI的建议以及SHAP解释图，判断贷款是否会被批准")
+        st.image('Shap解释说明.png', caption='SHAP解释图示例')
+        st.write("由以上的shap瀑布图可知，模型根据涉及的特征计算得到的f(x)值为2.011，大于0，预测结果为不患心脏病（示例）")
     elif group == 'group3':
-        st.write("**培训内容：**")
-        st.write("您将看到AI的建议和文本解释，以帮助您理解AI的决策依据。")
+        st.write("您将根据申请者信息和AI的建议以及文本解释，判断贷款是否会被批准")
         st.write("""
         **文本解释示例：**
 
-        模型认为：cibil_score 值为 700 对结果有正面影响；loan_amount 值为 500000 对结果有负面影响；loan_term 值为 15 对结果有正面影响；income_annum 值为 800000 对结果有正面影响；residential_assets_value 值为 2000000 对结果有负面影响。
+        模型认为：特征1 值为 700 对结果有正面影响；特征2 值为 500000 对结果有负面影响；特征3 值为 15 对结果有正面影响；特征4 值为 800000 对结果有正面影响；特征5 值为 2000000 对结果有负面影响。
         """)
-
     elif group == 'group4':
-        st.write("**培训内容：**")
-        st.write("您将看到AI的建议和交互式解释，以帮助您理解AI的决策依据。")
-        st.write("以下是交互式解释的示例，您可以调整特征值，查看模型预测的变化：")
-        sample_features = {}
-        for col in ['cibil_score', 'loan_term', 'loan_amount', 'income_annum', 'residential_assets_value']:
-            min_val = df[col].min()
-            max_val = df[col].max()
-            mean_val = df[col].mean()
-            if col == 'loan_term':
-                sample_features[col] = st.slider(f"{col}", int(min_val), int(max_val), int(mean_val), step=1, key=f'train_{col}')
-            else:
-                sample_features[col] = st.slider(f"{col}", float(min_val), float(max_val), float(mean_val), key=f'train_{col}')
-        X_sample = pd.DataFrame(sample_features, index=[0])
-        sample_prediction = model.predict(X_sample)[0]
-        sample_decision = '批准' if sample_prediction == 1 else '拒绝'
-        st.write(f"**模型预测结果：{sample_decision}**")
+        st.write("您将根据申请者信息和AI的建议以及交互解释，判断贷款是否会被批准")
+        st.write("以下是交互说明示例（培训用）：")
+        st.image('交互说明.png', caption='交互说明')
 
-    if st.button("开始测试", key='start_quiz'):
+    if st.button("如果您已了解实验情况，请点击开始测试", key='start_quiz'):
         st.session_state.page = 'quiz'
 
 def quiz_page():
@@ -217,7 +215,7 @@ def quiz_page():
                 'question': '在实验中，您需要根据申请者的资料和AI的建议判断贷款是否会被批准。',
                 'options': ['正确', '错误'],
                 'answer': '正确'
-            },
+            }
         ]
     elif group == 'group2':
         questions = [
@@ -227,11 +225,11 @@ def quiz_page():
                 'answer': '正确'
             },
             {
-                'question': '基于下方的Shap解释图，你认为redidential_assets_value是对模型预测正向影响最大的特征吗？',
-                'image': '对实例的Shap解释图.png',
-                'options': ['正确', '错误'],
-                'answer': '正确'
-            },
+                'question': '基于下方的Shap解释图，你认为下面哪个是对模型预测正向影响最大的特征？',
+                'image': '培训测试.png',
+                'options': ['ca', 'chol', 'fbs', 'thal'],
+                'answer': 'thal'
+            }
         ]
     elif group == 'group3':
         questions = [
@@ -239,7 +237,7 @@ def quiz_page():
                 'question': '在实验中，您需要根据申请者的资料和AI的建议以及文本解释判断贷款是否会被批准。',
                 'options': ['正确', '错误'],
                 'answer': '正确'
-            },
+            }
         ]
     elif group == 'group4':
         questions = [
@@ -252,12 +250,8 @@ def quiz_page():
                 'question': '最终的预测是基于最初呈现的申请人基本信息来决定。',
                 'options': ['了解', '不了解'],
                 'answer': '了解'
-            },
+            }
         ]
-
-    if 'quiz_submitted' not in st.session_state:
-        st.session_state.quiz_submitted = False
-        st.session_state.quiz_passed = False
 
     if not st.session_state.quiz_submitted:
         score = 0
@@ -278,50 +272,94 @@ def quiz_page():
             st.session_state.quiz_submitted = True
             if score == total:
                 st.session_state.quiz_passed = True
-                st.success("恭喜您，全部回答正确！点击下方按钮进入正式实验。")
+                st.success("恭喜您，全部回答正确！点击下方按钮进入正式实验前的调查。")
             else:
                 st.session_state.quiz_passed = False
                 st.error(f"您答对了 {score}/{total} 道题目，请重新阅读培训内容并再次尝试。")
     else:
         if st.session_state.quiz_passed:
-            if st.button("进入实验", key='enter_experiment'):
-                st.session_state.page = 'experiment'
+            if st.button("进行实验前调查", key='enter_pre_survey'):
+                st.session_state.page = 'pre_experiment_survey'
         else:
             if st.button("重新培训", key='retry_training'):
                 st.session_state.page = 'training'
                 st.session_state.quiz_submitted = False
                 st.session_state.quiz_passed = False
 
+def pre_experiment_survey_page():
+    st.title("正式实验前的调查")
+
+    # 1.请选择您的性别
+    gender = st.radio("1. 请选择您的性别？", ["男", "女"], key='gender')  # 移除“其他”
+
+    # 2.您的年龄为？
+    age = st.text_input("2. 您的年龄为？", key='age')
+
+    # 3. 您对人工智能的了解程度为？
+    ai_knowledge = st.radio(
+        "3. 您对人工智能的了解程度为？",
+        [
+            "我不了解人工智能",
+            "我知道人工智能的基本概念",
+            "我使用过人工智能",
+            "我是人工智能方面的专家"
+        ],
+        key='ai_knowledge'
+    )
+
+    # 4. 人类认知风格13题 (简单示例)
+    st.write("4. 以下是简短版的人类认知风格量表的13个问题（1-7分）：")
+    pre_survey_responses = {
+        'gender': gender,
+        'age': age,
+        'ai_knowledge': ai_knowledge
+    }
+    for i in range(1, 14):
+        score = st.slider(f"第{i}题：对该描述的同意程度（1-7）", 1, 7, 4, key=f'pre_style_{i}')
+        pre_survey_responses[f"cognitive_style_q{i}"] = score
+
+    if st.button("提交调查", key='submit_pre_survey'):
+        st.session_state.pre_survey_responses = pre_survey_responses
+        st.session_state.page = 'experiment'
+        # 重置当前步骤
+        st.session_state.current_step = 1
+
 def experiment_page():
-    st.title(f"实验进行中：案例 {st.session_state.case_index + 1}/10")
+    st.title(f"实验进行中：案例 {st.session_state.case_index + 1}/{len(st.session_state.cases)}")
+
+    # 开始计时
+    if st.session_state.start_time is None:
+        st.session_state.start_time = time.time()
+
     case = st.session_state.cases.iloc[st.session_state.case_index]
     st.write("**申请者信息：**")
     st.table(case.drop('loan_status').to_frame().T)
 
-    if not st.session_state.initial_decision_made:
-        st.write("请根据以上信息判断贷款是否会被批准：")
-        initial_decision = st.radio("", ['批准', '拒绝'], key=f'initial_decision_{st.session_state.case_index}')
-        if st.button("提交初始决策", key=f'submit_initial_{st.session_state.case_index}'):
-            st.session_state.initial_decisions.append(initial_decision)
-            st.session_state.initial_decision_made = True
-            st.session_state.start_time = time.time()
-    elif not st.session_state.final_decision_made:
-        st.write(f"**您的初始决策：{st.session_state.initial_decisions[-1]}**")
-        X_case = case.drop('loan_status').to_frame().T
-        ai_prediction = model.predict(X_case)[0]
-        ai_decision = '批准' if ai_prediction == 1 else '拒绝'
-        st.write(f"**AI 建议：{ai_decision}**")
+    # 判断是否需要解释
+    no_explain = True if st.session_state.case_index < 10 else False
 
-        group = st.session_state.group
+    # 显示AI预测
+    X_case = case.drop('loan_status').to_frame().T
+    ai_prediction = model.predict(X_case)[0]
+    ai_decision = '批准' if ai_prediction == 1 else '拒绝'
+    st.write(f"**AI 建议：{ai_decision}**")
 
+    group = st.session_state.group
+    if no_explain:
+        st.write("(此案例不提供任何AI解释。)")
+    else:
+        # 后10个案例根据组别提供解释
         if group == 'group1':
-            st.write("（此组别不提供AI解释。）")
+            st.write("（该组不提供AI解释。）")
         elif group == 'group2':
             shap_values = explainer(X_case)
             st.write("**AI 解释（SHAP 解释）：**")
             shap.initjs()
             fig, ax = plt.subplots()
             shap.plots.waterfall(shap_values[0], max_display=5, show=False)
+            # 确保字体已正确设置
+            plt.rcParams['font.family'] = 'SimHei' if os.path.exists(font_path) else 'DejaVu Sans'
+            plt.rcParams['axes.unicode_minus'] = True  # 再次确保负号显示
             st.pyplot(fig)
         elif group == 'group3':
             st.write("**AI 解释（文本解释）：**")
@@ -354,7 +392,7 @@ def experiment_page():
                 max_val = df[col].max()
                 mean_val = float(X_case[col])
                 if col == 'loan_term':
-                    adjusted_value = st.slider(f"{col}", int(min_val), int(max_val), int(mean_val), key=f'adjust_{col}_{st.session_state.case_index}', step=1)
+                    adjusted_value = st.slider(f"{col}", int(min_val), int(max_val), int(mean_val), step=1, key=f'adjust_{col}_{st.session_state.case_index}')
                 else:
                     adjusted_value = st.slider(f"{col}", float(min_val), float(max_val), float(mean_val), key=f'adjust_{col}_{st.session_state.case_index}')
                 adjusted_features[col] = adjusted_value
@@ -363,31 +401,57 @@ def experiment_page():
             adjusted_decision = '批准' if adjusted_prediction == 1 else '拒绝'
             st.write(f"**调整后的AI建议：{adjusted_decision}**")
 
-        final_decision = st.radio("请给出您的最终决策：", ['批准', '拒绝'], key=f'final_decision_{st.session_state.case_index}')
-        if st.button("提交最终决策", key=f'submit_final_{st.session_state.case_index}'):
+    # 决策提交逻辑
+    if st.session_state.current_step == 1:
+        # 显示最终决策表单
+        with st.form(key='decision_form'):
+            final_decision = st.radio("请给出您的最终决策：", ['批准', '拒绝'], key=f'final_decision_{st.session_state.case_index}')
+            submit_decision = st.form_submit_button(label='提交决策')
+
+        if submit_decision:
             st.session_state.final_decisions.append(final_decision)
-            st.session_state.final_decision_made = True
             decision_time = time.time() - st.session_state.start_time
             st.session_state.decision_times.append(decision_time)
-    elif not st.session_state.sliders_completed:
-        st.write("**请回答以下问题（0-100）：**")
-        trust_score = st.slider("我完全相信AI预测：", 0, 100, key=f'trust_score_{st.session_state.case_index}')
-        reliance_score = st.slider("我依赖于AI的提示：", 0, 100, key=f'reliance_score_{st.session_state.case_index}')
-        if st.button("下一步", key=f'next_{st.session_state.case_index}'):
+            st.session_state.current_step = 2  # 进入评分步骤
+
+    elif st.session_state.current_step == 2:
+        # 显示信任度和依赖度评分表单
+        with st.form(key='scores_form'):
+            st.write("**请回答以下问题（0-100）：**")
+
+            # 问题1
+            st.write("你相信人工智能提供的决策及依据吗？")
+            trust_score = st.slider("", 0, 100, key=f'trust_score_{st.session_state.case_index}')
+            # 使用列布局来对齐说明文本
+            col1, col2 = st.columns([1,1])
+            with col1:
+                st.write("0 ----- 完全不相信")
+            with col2:
+                st.write("100 ----- 完全相信")
+
+            # 问题2
+            st.write("你在决策时所采取的策略为？")
+            reliance_score = st.slider("", 0, 100, key=f'reliance_score_{st.session_state.case_index}')
+            # 使用列布局来对齐说明文本
+            col3, col4 = st.columns([1,1])
+            with col3:
+                st.write("0 ----- 完全依赖于自己数据分析")
+            with col4:
+                st.write("100 ----- 完全依赖于AI的提示")
+
+            submit_scores = st.form_submit_button(label='提交评分')
+
+        if submit_scores:
             st.session_state.trust_scores.append(trust_score)
             st.session_state.reliance_scores.append(reliance_score)
-            st.session_state.sliders_completed = True
-
+            # 重置步骤并移动到下一个案例或问卷调查
             st.session_state.case_index += 1
-            st.session_state.initial_decision_made = False
-            st.session_state.final_decision_made = False
-            st.session_state.sliders_completed = False
+            st.session_state.current_step = 1
             st.session_state.start_time = None
 
             if st.session_state.case_index >= len(st.session_state.cases):
                 st.session_state.page = 'survey'
-    else:
-        st.write("请按照指示完成实验步骤。")
+            # Streamlit 会自动重新运行脚本，无需调用 st.experimental_rerun()
 
 def survey_page():
     st.title("问卷调查")
@@ -405,7 +469,6 @@ def survey_page():
     ]
 
     responses = []
-
     options = {
         7: '非常同意',
         6: '同意',
@@ -416,13 +479,16 @@ def survey_page():
         1: '非常不同意'
     }
 
-    for idx, question in enumerate(questions):
-        st.write(question)
-        response = st.radio("", list(options.values()), key=f'survey_q{idx+1}')
-        score = [k for k, v in options.items() if v == response][0]
-        responses.append(score)
+    with st.form(key='survey_form'):
+        for idx, question in enumerate(questions):
+            st.write(question)
+            response = st.radio("", list(options.values()), key=f'survey_q{idx+1}')
+            score = [k for k, v in options.items() if v == response][0]
+            responses.append(score)
 
-    if st.button("提交问卷", key='submit_survey'):
+        submit_survey = st.form_submit_button(label='提交问卷')
+
+    if submit_survey:
         st.session_state.survey_responses = responses
         st.session_state.page = 'thankyou'
 
@@ -430,10 +496,9 @@ def thankyou_page():
     st.title("实验结束")
     st.write("感谢您的参与！")
 
-    num_cases = len(st.session_state.initial_decisions)
+    num_cases = len(st.session_state.final_decisions)
     results = pd.DataFrame({
         'Case_Index': list(range(1, num_cases + 1)),
-        'Initial_Decision': st.session_state.initial_decisions,
         'Final_Decision': st.session_state.final_decisions,
         'Decision_Time': st.session_state.decision_times,
         'Trust_Score': st.session_state.trust_scores,
@@ -445,53 +510,71 @@ def thankyou_page():
         'Response': st.session_state.survey_responses
     })
 
+    pre_survey_df = pd.DataFrame([st.session_state.pre_survey_responses])
+
     st.write("您的实验结果：")
     st.dataframe(results)
     st.write("您的问卷调查回答：")
     st.dataframe(survey_df)
 
-    # 使用 st.secrets 中的 AWS 凭证信息
-    aws_access_key = st.secrets["aws"]["aws_access_key_id"]
-    aws_secret_key = st.secrets["aws"]["aws_secret_access_key"]
-    bucket_name = st.secrets["aws"]["aws_bucket_name"]
-    region_name = st.secrets["aws"]["aws_region"]
+    st.write("您的实验前调查回答：")
+    st.dataframe(pre_survey_df)
 
-    s3 = boto3.client('s3',
-                      aws_access_key_id=aws_access_key,
-                      aws_secret_access_key=aws_secret_key,
-                      region_name=region_name)
+    # 改动2：删除保存到本地指定路径 D的相关代码，只保留保存到S3的代码
+    # 保存到S3
+    try:
+        # 使用 st.secrets 中的 AWS 凭证信息
+        aws_access_key = st.secrets["aws"]["aws_access_key_id"]
+        aws_secret_key = st.secrets["aws"]["aws_secret_access_key"]
+        bucket_name = st.secrets["aws"]["aws_bucket_name"]
+        region_name = st.secrets["aws"]["aws_region"]
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    participant_id = f"participant_{timestamp}"
-    folder_path = f"{st.session_state.group}/{participant_id}"
+        s3 = boto3.client('s3',
+                          aws_access_key_id=aws_access_key,
+                          aws_secret_access_key=aws_secret_key,
+                          region_name=region_name)
 
-    results_csv = results.to_csv(index=False)
-    survey_csv = survey_df.to_csv(index=False)
+        group = st.session_state.group
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        participant_id = f"participant_{timestamp}"
+        folder_path_s3 = f"{group}/{participant_id}"
+        results_csv = results.to_csv(index=False)
+        survey_csv = survey_df.to_csv(index=False)
+        pre_survey_csv = pre_survey_df.to_csv(index=False)
 
-    s3.put_object(Bucket=bucket_name, Key=f"{folder_path}/results.csv", Body=results_csv)
-    s3.put_object(Bucket=bucket_name, Key=f"{folder_path}/survey.csv", Body=survey_csv)
+        s3.put_object(Bucket=bucket_name, Key=f"{folder_path_s3}/results.csv", Body=results_csv)
+        s3.put_object(Bucket=bucket_name, Key=f"{folder_path_s3}/survey.csv", Body=survey_csv)
+        s3.put_object(Bucket=bucket_name, Key=f"{folder_path_s3}/pre_survey.csv", Body=pre_survey_csv)
 
-    st.write("实验数据已上传至 S3 存储桶。")
-    st.write("请注意，您可以使用 S3 控制台或相应的工具从 S3 下载这些文件。")
+        st.success("实验数据已上传至 S3 存储桶。")
+        st.write("请注意，您可以使用 S3 控制台或相应的工具从 S3 下载这些文件。")
+    except Exception as e:
+        st.error(f"上传到S3时出错: {e}")
 
-# 页面路由
-if st.session_state.page == 'consent':
-    consent_page()
-elif st.session_state.page == 'instructions':
-    instructions_page()
-elif st.session_state.page == 'training':
-    training_page()
-elif st.session_state.page == 'quiz':
-    quiz_page()
-elif st.session_state.page == 'experiment':
-    experiment_page()
-elif st.session_state.page == 'survey':
-    survey_page()
-elif st.session_state.page == 'thankyou':
-    thankyou_page()
-else:
-    st.session_state.page = 'consent'
-    consent_page()
+def main():
+    # 页面路由（确保每个函数只定义一次）
+    if st.session_state.page == 'consent':
+        consent_page()
+    elif st.session_state.page == 'instructions':
+        instructions_page()
+    elif st.session_state.page == 'training':
+        training_page()
+    elif st.session_state.page == 'quiz':
+        quiz_page()
+    elif st.session_state.page == 'pre_experiment_survey':
+        pre_experiment_survey_page()
+    elif st.session_state.page == 'experiment':
+        experiment_page()
+    elif st.session_state.page == 'survey':
+        survey_page()
+    elif st.session_state.page == 'thankyou':
+        thankyou_page()
+    else:
+        st.session_state.page = 'consent'
+        consent_page()
+
+if __name__ == "__main__":
+    main()
 
 
 
