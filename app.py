@@ -10,13 +10,11 @@ import xgboost as xgb
 from sklearn.model_selection import train_test_split, GridSearchCV
 import os
 from datetime import datetime
-import matplotlib.font_manager as fm
-import boto3  # 导入 boto3
+import boto3
 
 # 使用微软雅黑字体确保中英文与负号正确显示
-plt.rcParams['font.family'] = ['sans-serif']
-plt.rcParams['font.sans-serif'] = ['DejaVu Sans']  # 使用微软雅黑
-plt.rcParams['axes.unicode_minus'] = False  # 确保负号显示正常
+plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']  # 使用微软雅黑
+plt.rcParams['axes.unicode_minus'] = True  # 确保负号显示
 
 # 配置Streamlit页面
 st.set_page_config(page_title="贷款审批实验", page_icon=":money_with_wings:", layout="centered")
@@ -37,17 +35,28 @@ if 'page' not in st.session_state:
     st.session_state.quiz_submitted = False
     st.session_state.quiz_passed = False
     st.session_state.current_step = 1
+    st.session_state.instructions_start_time = None
+    st.session_state.show_warning = False
+    st.session_state.show_read_options = False  # 新增用于控制是否显示阅读确认按钮
 
 @st.cache_data
 def load_data():
     df = pd.read_csv('loan_approval_dataset_xiu.csv')
     df.columns = df.columns.str.strip()
-    df = df[['cibil_score', 'loan_term', 'loan_amount', 'income_annum', 'residential_assets_value', 'loan_status']]
+    # 重命名列名为中文并筛选指定列
+    df.rename(columns={
+        'income_annum': '年收入',
+        'loan_amount': '贷款金额',
+        'loan_term': '贷款期限',
+        'cibil_score': '信用评分',
+        'residential_assets_value': '住房资产价值',
+        'loan_status': '贷款申请状态'
+    }, inplace=True)
+    df = df[['年收入', '贷款金额', '贷款期限', '信用评分', '住房资产价值', '贷款申请状态']]
     return df
 
 df = load_data()
 
-# 修改案例索引
 indices_first_10 = [70, 90, 2856, 100, 564, 110, 120, 3474, 130, 140]  # 前10无解释
 indices_last_10 = [5, 10, 1039, 15, 1174, 25, 30, 2564, 40, 50]       # 后10有解释
 specific_indices = indices_first_10 + indices_last_10
@@ -57,8 +66,8 @@ if 'cases' not in st.session_state:
 
 @st.cache_resource
 def train_model(data):
-    X = data.drop(['loan_status'], axis=1)
-    y = data['loan_status']
+    X = data.drop(['贷款申请状态'], axis=1)
+    y = data['贷款申请状态']
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
@@ -100,7 +109,7 @@ model = train_model(df)
 def get_shap_explainer(_model, data):
     return shap.Explainer(_model, data)
 
-explainer = get_shap_explainer(model, df.drop('loan_status', axis=1))
+explainer = get_shap_explainer(model, df.drop('贷款申请状态', axis=1))
 
 def consent_page():
     st.title("知情同意书")
@@ -109,6 +118,7 @@ def consent_page():
 
     * 本实验旨在研究人类与人工智能协作的决策过程。
     * 实验过程中，您的数据将被匿名处理，仅用于研究目的。
+    * 请按照要求进行真实的回答，实验过程可能会存在轻微卡顿情况，还请谅解。
     * 您有权随时退出实验。
 
     如果您同意参加实验，请点击下方的“我同意”按钮。
@@ -117,6 +127,9 @@ def consent_page():
         st.session_state.page = 'instructions'
 
 def instructions_page():
+    if st.session_state.instructions_start_time is None:
+        st.session_state.instructions_start_time = time.time()
+
     st.title("实验说明")
     st.write("""
     **任务目标：**
@@ -132,24 +145,59 @@ def instructions_page():
 
     **报酬方式：**
 
-    实验结束后，将根据您的决策准确性分发奖金，除基础奖金外，准确率高于80%的参与者将获得额外奖金。
+    实验结束后，将根据您的决策准确性分发奖金，除基础奖金外，准确率高于85%的参与者将获得额外奖金。
 
-    **相关解释：**
+    **相关解释说明：**
 
-    本实验中的AI解释包括无解释、SHAP解释、文本解释以及交互式解释（视组别而定），以帮助您了解模型决策的依据。
+    本实验中的AI解释包括SHAP解释、文本解释以及交互式解释（视组别而定），以帮助您了解模型决策的依据。
 
-    **标签说明：**
+    **解释说明：**
 
     在正式开始实验之前，请先查看以下图表，了解特征与目标变量之间的关系。
     """)
 
     st.write("为了让你更好的理解实验中涉及的叠加直方图，下面将依次提供叠加直方图和数据标签的解释说明")
+    st.image('叠加直方图示例.png', caption='叠加直方图示例')
     st.image('数据标签解释.png', caption='数据标签说明')
     st.write("提醒：后续呈现的申请者信息标签均为上述英文形式，请记住其代表的中文含义。")
 
+    variables = ["年收入", "贷款期限", "信用评分", "贷款金额", "住房资产价值"]
+    target = "贷款申请状态"
 
-    if st.button("我已了解上述信息，开始培训", key='start_training'):
-        st.session_state.page = 'training'
+    for var in variables:
+        st.write(f"**{var} 与 {target} 的关系：**")
+        fig, ax = plt.subplots(figsize=(8, 5))
+        for status, color in zip(df[target].unique(), ['blue', 'orange']):
+            subset = df[df[target] == status]
+            ax.hist(subset[var], bins=20, alpha=0.5, density=True, label=f"{target} = {status}", color=color)
+        ax.set_title(f"{var} 与 {target} 的关系", fontsize=14)
+        ax.set_xlabel(var, fontsize=12)
+        ax.set_ylabel("密度", fontsize=12)
+        ax.legend(title=target, fontsize=10, loc='upper right')
+        ax.grid(axis='y', linestyle='--', alpha=0.7)
+        plt.tight_layout()
+        st.pyplot(fig)
+
+    browse_time = time.time() - st.session_state.instructions_start_time
+
+    if st.button("如果您已了解实验情况，请点击开始测试", key='start_test'):
+        if browse_time < 60:
+            st.session_state.show_read_options = True
+        else:
+            st.session_state.page = 'training'
+
+    if st.session_state.show_read_options:
+        st.warning("您是否已认真阅读了实验说明部分？")
+        col_yes, col_no = st.columns(2)
+        with col_yes:
+            if st.button("我已充分阅读", key='fully_read'):
+                st.session_state.page = 'training'
+                st.session_state.show_read_options = False
+        with col_no:
+            if st.button("我还需继续阅读", key='need_more_time'):
+                st.session_state.instructions_start_time = time.time()
+                st.session_state.show_read_options = False
+        # 不需要调用 st.stop()，让 Streamlit 自然重新运行脚本
 
 def training_page():
     st.title("培训")
@@ -158,7 +206,7 @@ def training_page():
     st.write("""
     **报酬方式：**
 
-    实验结束后，将根据您的决策准确性分发奖金，除基础奖金外，准确率高于80%的参与者将获得额外奖金。
+    实验结束后，将根据您的决策准确性分发奖金，除基础奖金外，准确率高于85%的参与者将获得额外奖金。
     """)
 
     if group == 'group1':
@@ -174,7 +222,7 @@ def training_page():
 
         模型认为：特征1 值为 700 对结果有正面影响；特征2 值为 500000 对结果有负面影响；特征3 值为 15 对结果有正面影响；特征4 值为 800000 对结果有正面影响；特征5 值为 2000000 对结果有负面影响。
         """)
-        st.write("特征的顺序是按对模型预测重要性大小排序，重要性高的特征排在前面")
+        st.write("特征的顺序是按对模型预测重要性大小排序，重要性高的特征排在前面。")
     elif group == 'group4':
         st.write("您将根据申请者信息和AI的建议以及交互解释，判断贷款是否会被批准")
         st.write("以下是交互说明示例（培训用）：")
@@ -187,6 +235,7 @@ def quiz_page():
     st.title("培训测试")
     group = st.session_state.group
 
+    # 定义注意力测试题
     attention_question = {
         'question': '可用于照明的电器是？',
         'options': ['音响', '台灯', '空调', '洗衣机'],
@@ -200,7 +249,7 @@ def quiz_page():
                 'options': ['正确', '错误'],
                 'answer': '正确'
             },
-            attention_question
+            attention_question  # 添加注意力测试题
         ]
     elif group == 'group2':
         questions = [
@@ -215,7 +264,7 @@ def quiz_page():
                 'options': ['ca', 'chol', 'fbs', 'thal'],
                 'answer': 'thal'
             },
-            attention_question
+            attention_question  # 添加注意力测试题
         ]
     elif group == 'group3':
         questions = [
@@ -224,7 +273,17 @@ def quiz_page():
                 'options': ['正确', '错误'],
                 'answer': '正确'
             },
-            attention_question
+            {
+                'question': '在本实验中，文本解释是用来帮助您理解人工智能预测结果的主要依据。以下哪项描述正确反映了文本解释的特征排序规则？',
+                'options': [
+                    '特征按照字母顺序排序',
+                    '特征按照它们对预测结果的重要性从高到低排序',
+                    '特征按照数据输入的时间顺序排序',
+                    '特征按照系统随机顺序显示'
+                ],
+                'answer': '特征按照它们对预测结果的重要性从高到低排序'
+            },
+            attention_question  # 添加注意力测试题
         ]
     elif group == 'group4':
         questions = [
@@ -234,11 +293,26 @@ def quiz_page():
                 'answer': '正确'
             },
             {
-                'question': '最终的预测是基于最初呈现的申请人基本信息来决定，调整的AI建议是根据你改变的特征值所产生的建议。',
-                'options': ['不了解', '了解'],
-                'answer': '了解'
+                'question': '交互式解释的主要目的是：',
+                'options': [
+                    '提供模型预测的总体准确率',
+                    '允许用户通过调整特征值观察预测结果的变化',
+                    '按特征重要性从高到低展示SHAP值',
+                    '显示AI的内部计算过程'
+                ],
+                'answer': '允许用户通过调整特征值观察预测结果的变化'
             },
-            attention_question
+            {
+                'question': '在交互式解释中，如果某个特征值的调整对预测结果没有任何变化，这可能意味着：',
+                'options': [
+                    '预测模型无法识别该特征',
+                    '特征值的调整范围设置有误',
+                    '预测模型存在重大错误',
+                    '该特征对模型预测结果的影响较小'
+                ],
+                'answer': '该特征对模型预测结果的影响较小'
+            },
+            attention_question  # 添加注意力测试题
         ]
 
     if not st.session_state.quiz_submitted:
@@ -277,8 +351,13 @@ def quiz_page():
 def pre_experiment_survey_page():
     st.title("正式实验前的调查")
 
-    gender = st.radio("1. 请选择您的性别？", ["男", "女"], key='gender')
+    # 1.请选择您的性别
+    gender = st.radio("1. 请选择您的性别？", ["男", "女"], key='gender')  # 移除“其他”
+
+    # 2.您的年龄为？
     age = st.text_input("2. 您的年龄为？", key='age')
+
+    # 3. 您对人工智能的了解程度为？
     ai_knowledge = st.radio(
         "3. 您对人工智能的了解程度为？",
         [
@@ -324,10 +403,20 @@ def pre_experiment_survey_page():
         score = st.slider(f"第{i+1}题：{question}", 1, 5, 1, key=f'pre_style_{i+1}')
         pre_survey_responses[f"cognitive_style_q{i+1}"] = score
 
+    # 计算直觉型得分和和深思熟虑型得分和
+    intuitive_indices = [2, 4, 5, 8, 9, 12, 15, 17, 18, 19]       # 直觉型题目编号
+    deliberative_indices = [1, 3, 6, 7, 10, 11, 13, 14, 16]    # 深思熟虑型题目编号
+
+    intuitive_sum = sum([pre_survey_responses[f"cognitive_style_q{idx}"] for idx in intuitive_indices])
+    deliberative_sum = sum([pre_survey_responses[f"cognitive_style_q{idx}"] for idx in deliberative_indices])
+
+    pre_survey_responses['直觉型得分和'] = intuitive_sum
+    pre_survey_responses['深思熟虑型得分和'] = deliberative_sum
+
     if st.button("提交调查", key='submit_pre_survey'):
+        # 直接存储调查数据，包括计算的得分和
         st.session_state.pre_survey_responses = pre_survey_responses
         st.session_state.page = 'experiment'
-        st.session_state.current_step = 1
 
 def experiment_page():
     st.title(f"实验进行中：案例 {st.session_state.case_index + 1}/{len(st.session_state.cases)}")
@@ -337,10 +426,11 @@ def experiment_page():
 
     case = st.session_state.cases.iloc[st.session_state.case_index]
     st.write("**申请者信息：**")
-    st.table(case.drop('loan_status').to_frame().T)
+    # 使用 dataframe 并 use_container_width=True 使内容宽度扩大
+    st.dataframe(case.drop('贷款申请状态').to_frame().T, use_container_width=True)
 
     no_explain = True if st.session_state.case_index < 10 else False
-    X_case = case.drop('loan_status').to_frame().T
+    X_case = case.drop('贷款申请状态').to_frame().T
     ai_prediction = model.predict(X_case)[0]
     ai_decision = '批准' if ai_prediction == 1 else '拒绝'
     st.write(f"**AI 建议：{ai_decision}**")
@@ -357,7 +447,6 @@ def experiment_page():
             shap.initjs()
             fig, ax = plt.subplots()
             shap.plots.waterfall(shap_values[0], max_display=5, show=False)
-            # 不再重新设置字体，依赖全局设置
             st.pyplot(fig)
         elif group == 'group3':
             shap_values = explainer(X_case)
@@ -389,10 +478,9 @@ def experiment_page():
                 min_val = df[col].min()
                 max_val = df[col].max()
                 mean_val = float(X_case[col])
-                if col == 'loan_term':
-                    adjusted_value = st.slider(f"{col}", int(min_val), int(max_val), int(mean_val), step=1, key=f'adjust_{col}_{st.session_state.case_index}')
-                else:
-                    adjusted_value = st.slider(f"{col}", float(min_val), float(max_val), float(mean_val), key=f'adjust_{col}_{st.session_state.case_index}')
+                adjusted_value = st.slider(col, float(min_val), float(max_val), float(mean_val), key=f'adjust_{col}_{st.session_state.case_index}')
+                if col == '贷款期限':
+                    adjusted_value = int(adjusted_value)
                 adjusted_features[col] = adjusted_value
             X_adjusted = pd.DataFrame(adjusted_features, index=[0])
             adjusted_prediction = model.predict(X_adjusted)[0]
@@ -415,7 +503,7 @@ def experiment_page():
             st.write("**请回答以下问题（0-100）：**")
 
             st.write("你相信人工智能提供的决策及依据吗？")
-            trust_score = st.slider("我完全相信AI预测：", 0, 100, key=f'trust_score_{st.session_state.case_index}')
+            trust_score = st.slider("", 0, 100, key=f'trust_score_{st.session_state.case_index}')
             col1, col2 = st.columns([1,1])
             with col1:
                 st.write("0 ----- 完全不相信")
@@ -423,7 +511,7 @@ def experiment_page():
                 st.write("100 ----- 完全相信")
 
             st.write("你在决策时所采取的策略为？")
-            reliance_score = st.slider("我依赖于AI的提示：", 0, 100, key=f'reliance_score_{st.session_state.case_index}')
+            reliance_score = st.slider("", 0, 100, key=f'reliance_score_{st.session_state.case_index}')
             col3, col4 = st.columns([1,1])
             with col3:
                 st.write("0 ----- 完全依赖于自己数据分析")
@@ -507,11 +595,9 @@ def thankyou_page():
     st.dataframe(results)
     st.write("您的问卷调查回答：")
     st.dataframe(survey_df)
-
     st.write("您的实验前调查回答：")
     st.dataframe(pre_survey_df)
 
-    # 保存到S3
     try:
         aws_access_key = st.secrets["aws"]["aws_access_key_id"]
         aws_secret_key = st.secrets["aws"]["aws_secret_access_key"]
