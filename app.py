@@ -11,10 +11,8 @@ from sklearn.model_selection import train_test_split, GridSearchCV
 import os
 from datetime import datetime
 import boto3
-
-# 使用微软雅黑字体确保中英文与负号正确显示
-plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']  # 使用微软雅黑
-plt.rcParams['axes.unicode_minus'] = True  # 确保负号显示
+import requests
+from matplotlib import font_manager as fm
 
 # 配置Streamlit页面
 st.set_page_config(page_title="贷款审批实验", page_icon=":money_with_wings:", layout="centered")
@@ -111,6 +109,24 @@ def get_shap_explainer(_model, data):
 
 explainer = get_shap_explainer(model, df.drop('贷款申请状态', axis=1))
 
+@st.cache_resource
+def load_chinese_font():
+    font_url = "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf"
+    font_dir = "fonts"
+    font_path = os.path.join(font_dir, "NotoSansCJKsc-Regular.otf")
+    if not os.path.exists(font_path):
+        os.makedirs(font_dir, exist_ok=True)
+        r = requests.get(font_url)
+        with open(font_path, "wb") as f:
+            f.write(r.content)
+    # 添加字体到matplotlib
+    fm.fontManager.addfont(font_path)
+    plt.rcParams['font.family'] = 'Noto Sans CJK SC'
+    plt.rcParams['axes.unicode_minus'] = False
+
+# 加载中文字体
+load_chinese_font()
+
 def consent_page():
     st.title("知情同意书")
     st.write("""
@@ -173,7 +189,7 @@ def instructions_page():
         ax.set_title(f"{var} 与 {target} 的关系", fontsize=14)
         ax.set_xlabel(var, fontsize=12)
         ax.set_ylabel("密度", fontsize=12)
-        ax.legend(title=target, fontsize=10, loc='upper right')
+        ax.legend(title=target, fontsize=10, loc='upper right')  # 设置图例位置为右上角
         ax.grid(axis='y', linestyle='--', alpha=0.7)
         plt.tight_layout()
         st.pyplot(fig)
@@ -214,13 +230,13 @@ def training_page():
     elif group == 'group2':
         st.write("您将根据申请者信息和AI的建议以及SHAP解释图，判断贷款是否会被批准")
         st.image('Shap解释说明.png', caption='SHAP解释图示例')
-        st.write("由以上的shap瀑布图可知，模型根据涉及的特征计算得到的f(x)值为2.011，大于0，预测结果为不患心脏病（示例）")
+        st.write("由以上的SHAP瀑布图可知，模型根据涉及的特征计算得到的f(x)值为2.011，大于0，预测结果为不患心脏病（示例）")
     elif group == 'group3':
         st.write("您将根据申请者信息和AI的建议以及文本解释，判断贷款是否会被批准")
         st.write("""
         **文本解释示例：**
 
-        模型认为：特征1 值为 700 对结果有正面影响；特征2 值为 500000 对结果有负面影响；特征3 值为 15 对结果有正面影响；特征4 值为 800000 对结果有正面影响；特征5 值为 2000000 对结果有负面影响。
+        模型认为：信用评分 值为 700 对结果有正面影响；贷款金额 值为 500000 对结果有负面影响；贷款期限 值为 15 对结果有正面影响；年收入 值为 800000 对结果有正面影响；住房资产价值 值为 2000000 对结果有负面影响。
         """)
         st.write("特征的顺序是按对模型预测重要性大小排序，重要性高的特征排在前面。")
     elif group == 'group4':
@@ -292,6 +308,13 @@ def quiz_page():
                 'options': ['正确', '错误'],
                 'answer': '正确'
             },
+            # 删除原有的问题
+            # {
+            #     'question': '最终的预测是基于最初呈现的申请人基本信息来决定。',
+            #     'options': ['了解', '不了解'],
+            #     'answer': '了解'
+            # },
+            # 添加两个新的问题
             {
                 'question': '交互式解释的主要目的是：',
                 'options': [
@@ -649,6 +672,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
