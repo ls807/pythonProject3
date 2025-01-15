@@ -22,22 +22,31 @@ if 'page' not in st.session_state:
     st.session_state.page = 'consent'
     st.session_state.group = random.choice(['group1', 'group2', 'group3', 'group4'])
     st.session_state.case_index = 0
+
+    # 存储用户每个案例的决策及评分
     st.session_state.final_decisions = []
     st.session_state.decision_times = []
     st.session_state.trust_scores = []
     st.session_state.reliance_scores = []
+    st.session_state.regret_scores = []  # 新增后悔程度分数
+
     st.session_state.start_time = None
     st.session_state.results_saved = False
+
+    # 调查问卷相关
     st.session_state.pre_survey_responses = {}
     st.session_state.survey_responses = []
+
+    # 培训测试相关
     st.session_state.quiz_submitted = False
     st.session_state.quiz_passed = False
+
+    # 指导流程
     st.session_state.current_step = 1
     st.session_state.instructions_start_time = None
     st.session_state.show_warning = False
-    st.session_state.show_read_options = False  # 用于控制是否显示阅读确认按钮
+    st.session_state.show_read_options = False
 
-# ---------------------加载并重命名数据---------------------
 @st.cache_data
 def load_data():
     df = pd.read_csv('loan_approval_dataset_xiu.csv')
@@ -64,7 +73,6 @@ specific_indices = indices_first_10 + indices_last_10
 if 'cases' not in st.session_state:
     st.session_state.cases = df.iloc[specific_indices].reset_index(drop=True)
 
-# ---------------------模型训练---------------------
 @st.cache_resource
 def train_model(data):
     X = data.drop(['贷款申请状态'], axis=1)
@@ -106,14 +114,12 @@ def train_model(data):
 
 model = train_model(df)
 
-# ---------------------SHAP解释器---------------------
 @st.cache_resource
 def get_shap_explainer(_model, data):
     return shap.Explainer(_model, data)
 
 explainer = get_shap_explainer(model, df.drop('贷款申请状态', axis=1))
 
-# ---------------------动态加载一款中文字体---------------------
 @st.cache_resource
 def load_chinese_font():
     font_url = "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf"
@@ -124,14 +130,12 @@ def load_chinese_font():
         r = requests.get(font_url)
         with open(font_path, "wb") as f:
             f.write(r.content)
-    # 添加字体到matplotlib
     fm.fontManager.addfont(font_path)
     plt.rcParams['font.family'] = 'Noto Sans CJK SC'
     plt.rcParams['axes.unicode_minus'] = False
 
 load_chinese_font()
 
-# ---------------------页面函数---------------------
 def consent_page():
     st.title("知情同意书")
     st.write("""
@@ -179,7 +183,7 @@ def instructions_page():
 
     st.write("为了让你更好的理解实验中涉及的叠加直方图，下面将依次提供叠加直方图（以心脏病为例）和数据标签的解释说明")
     st.image('叠加直方图培训.png', caption='叠加直方图示例')
-    st.markdown( '<span style="color: blue">从上图可知，当最大心率在较低值时（如100），患心脏病的比例较低；而当最大心率在较高值时（如170），患心脏病的比例较高</span>', unsafe_allow_html=True)
+    st.markdown('<span style="color: blue">从上图可知，当最大心率在较低值时（如100），患心脏病的比例较低；而当最大心率在较高值时（如170），患心脏病的比例较高</span>',unsafe_allow_html=True)
     st.image('数据标签解释.png', caption='数据标签说明')
     st.write("提醒：后续呈现的申请者信息标签均为上述中文形式。")
 
@@ -203,7 +207,7 @@ def instructions_page():
     browse_time = time.time() - st.session_state.instructions_start_time
 
     if st.button("如果您已了解实验情况，请点击开始测试", key='start_test'):
-        if browse_time < 100:
+        if browse_time < 60:
             st.session_state.show_read_options = True
         else:
             st.session_state.page = 'training'
@@ -245,13 +249,12 @@ def training_page():
         """)
         st.write("特征的顺序是按对模型预测重要性大小排序，重要性高的特征排在前面。")
     elif group == 'group4':
-        st.write("您将根据申请者信息和AI的建议以及交互解释，判断贷款是否会被批准")
+        st.write("您将根据申请者信息和AI的建议以及交互式解释，判断贷款是否会被批准")
         st.write("以下是交互说明示例（培训用）：")
         st.image('交互说明.png', caption='交互说明')
 
     if st.button("如果您已了解实验情况，请点击开始测试", key='start_quiz'):
         st.session_state.page = 'quiz'
-
 
 def quiz_page():
     st.title("培训测试")
@@ -310,7 +313,7 @@ def quiz_page():
     elif group == 'group4':
         questions = [
             {
-                'question': '在实验中，您需要根据申请者的资料和AI的建议以及交互解释判断贷款是否会被批准。',
+                'question': '在实验中，您需要根据申请者的资料和AI的建议以及交互式解释判断贷款是否会被批准。',
                 'options': ['正确', '错误'],
                 'answer': '正确'
             },
@@ -370,7 +373,6 @@ def quiz_page():
                 st.session_state.quiz_submitted = False
                 st.session_state.quiz_passed = False
 
-
 def pre_experiment_survey_page():
     st.title("正式实验前的调查")
 
@@ -425,7 +427,6 @@ def pre_experiment_survey_page():
         st.session_state.pre_survey_responses = pre_survey_responses
         st.session_state.page = 'experiment'
         st.session_state.current_step = 1
-
 
 def experiment_page():
     st.title(f"实验进行中：案例 {st.session_state.case_index + 1}/{len(st.session_state.cases)}")
@@ -499,7 +500,6 @@ def experiment_page():
             adjusted_decision = '批准' if adjusted_prediction == 1 else '拒绝'
             st.write(f"**调整后的AI建议：{adjusted_decision}**")
 
-    # 决策提交逻辑
     if st.session_state.current_step == 1:
         with st.form(key='decision_form'):
             final_decision = st.radio("请给出您的最终决策：", ['批准', '拒绝'],
@@ -532,11 +532,22 @@ def experiment_page():
             with col4:
                 st.write("100 ----- 完全依赖于AI的提示")
 
+            # 新增后悔程度题目
+            st.write("您对自己所做决策的后悔程度为？")
+            regret_score = st.slider("", 0, 100, key=f'regret_score_{st.session_state.case_index}')
+            col5, col6 = st.columns([1, 1])
+            with col5:
+                st.write("0 ----- 完全不后悔")
+            with col6:
+                st.write("100 ----- 非常后悔")
+
             submit_scores = st.form_submit_button(label='提交评分')
 
         if submit_scores:
             st.session_state.trust_scores.append(trust_score)
             st.session_state.reliance_scores.append(reliance_score)
+            st.session_state.regret_scores.append(regret_score)  # 记录后悔分数
+
             st.session_state.case_index += 1
             st.session_state.current_step = 1
             st.session_state.start_time = None
@@ -545,7 +556,6 @@ def experiment_page():
                 st.session_state.page = 'survey'
             else:
                 st.session_state.page = 'experiment'
-
 
 def survey_page():
     st.title("问卷调查")
@@ -596,7 +606,8 @@ def thankyou_page():
         'Final_Decision': st.session_state.final_decisions,
         'Decision_Time': st.session_state.decision_times,
         'Trust_Score': st.session_state.trust_scores,
-        'Reliance_Score': st.session_state.reliance_scores
+        'Reliance_Score': st.session_state.reliance_scores,
+        'Regret_Score': st.session_state.regret_scores  # 新增后悔分数
     })
 
     # ---- AI建议 & 真实标签对比统计 ----
@@ -632,14 +643,14 @@ def thankyou_page():
         1 for i in range(10) if final_decisions_last10[i] == true_labels_last10[i]
     ) / 10.0
 
-    # 将这四个统计标签加入 results DataFrame
-    # 如果 results 有多行，这里我们演示在最后新增一行 '统计汇总'
+    # 将这四个统计标签加入 results DataFrame：新增一行统计汇总
     extra_data = pd.DataFrame([{
         'Case_Index': '统计汇总',
         'Final_Decision': '',
         'Decision_Time': '',
         'Trust_Score': '',
         'Reliance_Score': '',
+        'Regret_Score': '',
         '前10次与AI建议一致性比例': ratio_first10_ai,
         '后10次与AI建议一致性比例': ratio_last10_ai,
         '前10次预测准确性比例': ratio_first10_truth,
@@ -692,7 +703,6 @@ def thankyou_page():
         st.write("请注意，您可以使用 S3 控制台或相应的工具从 S3 下载这些文件。")
     except Exception as e:
         st.error(f"上传到S3时出错: {e}")
-
 
 def main():
     if st.session_state.page == 'consent':
