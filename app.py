@@ -203,7 +203,7 @@ def instructions_page():
     browse_time = time.time() - st.session_state.instructions_start_time
 
     if st.button("如果您已了解实验情况，请点击开始测试", key='start_test'):
-        if browse_time < 60:
+        if browse_time < 100:
             st.session_state.show_read_options = True
         else:
             st.session_state.page = 'training'
