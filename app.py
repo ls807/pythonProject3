@@ -422,6 +422,15 @@ def pre_experiment_survey_page():
     for i, question in enumerate(cognitive_style_questions):
         score = st.slider(f"第{i + 1}题：{question}", 1, 5, 1, key=f'pre_style_{i + 1}')
         pre_survey_responses[f"cognitive_style_q{i + 1}"] = score
+    # 计算直觉型得分和和深思熟虑型得分和
+    intuitive_indices = [2, 4, 5, 8, 9, 12, 15, 17, 18, 19]  # 直觉型题目编号
+    deliberative_indices = [1, 3, 6, 7, 10, 11, 13, 14, 16]  # 深思熟虑型题目编号
+
+    intuitive_sum = sum([pre_survey_responses[f"cognitive_style_q{idx}"] for idx in intuitive_indices])
+    deliberative_sum = sum([pre_survey_responses[f"cognitive_style_q{idx}"] for idx in deliberative_indices])
+
+    pre_survey_responses['直觉型得分和'] = intuitive_sum
+    pre_survey_responses['深思熟虑型得分和'] = deliberative_sum
 
     if st.button("提交调查", key='submit_pre_survey'):
         st.session_state.pre_survey_responses = pre_survey_responses
